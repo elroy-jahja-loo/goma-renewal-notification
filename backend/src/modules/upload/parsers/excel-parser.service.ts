@@ -83,26 +83,40 @@ export class ExcelParserService {
       return this.parseXlsx(fileBuffer);
     }
 
-    throw new BadRequestException(`Unsupported file type: .${extension}`);
+    throw new BadRequestException(
+      `"${filename}" is not a supported file type. Please upload a .xlsx, .xls, or .csv file.`,
+    );
   }
 
   private parseXlsx(buffer: Buffer): ParsedRow[] {
-    const workbook = XLSX.read(buffer, {
-      type: 'buffer',
-      sheetRows: 10001,
-      cellFormula: false,
-      cellStyles: false,
-      cellDates: false,
-    });
+    let workbook;
+    try {
+      workbook = XLSX.read(buffer, {
+        type: 'buffer',
+        sheetRows: 10001,
+        cellFormula: false,
+        cellStyles: false,
+        cellDates: false,
+      });
+    } catch {
+      throw new BadRequestException(
+        'Could not read this Excel file. The file may be corrupted or in an unsupported format.',
+      );
+    }
+
     const sheetName = workbook.SheetNames[0];
     if (!sheetName) {
-      throw new BadRequestException('Excel file contains no sheets');
+      throw new BadRequestException(
+        'The uploaded Excel file has no worksheets. Please add a sheet with your renewal data.',
+      );
     }
     const sheet = workbook.Sheets[sheetName];
     const rows: any[][] = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '', raw: false });
 
     if (rows.length < 2) {
-      throw new BadRequestException('Excel file is empty or has no data rows');
+      throw new BadRequestException(
+        'The spreadsheet has headers but no data rows. Please add at least one row of renewal data below the headers.',
+      );
     }
 
     const headers = (rows[0] as string[]).map((h) => String(h).trim().toLowerCase());
@@ -112,16 +126,27 @@ export class ExcelParserService {
   private parseCsv(buffer: Buffer): ParsedRow[] {
     const content = buffer.toString('utf-8').trim();
     if (!content) {
-      throw new BadRequestException('CSV file is empty');
+      throw new BadRequestException(
+        'The CSV file is completely empty. Please add your renewal data and try again.',
+      );
     }
 
-    const records: string[][] = parse(content, {
-      skip_empty_lines: true,
-      relax_column_count: true,
-    });
+    let records: string[][];
+    try {
+      records = parse(content, {
+        skip_empty_lines: true,
+        relax_column_count: true,
+      });
+    } catch {
+      throw new BadRequestException(
+        'Could not parse this CSV file. The file may be corrupted or formatted incorrectly.',
+      );
+    }
 
     if (records.length < 2) {
-      throw new BadRequestException('CSV file has no data rows');
+      throw new BadRequestException(
+        'The CSV has headers but no data rows. Please add at least one row of renewal data below the headers.',
+      );
     }
 
     const headers = records[0].map((h) => String(h).trim().toLowerCase());
@@ -129,7 +154,12 @@ export class ExcelParserService {
   }
 
   private mapRows(headers: string[], dataRows: any[][]): ParsedRow[] {
-    return dataRows.map((row, index) => {
+    const recognizedColumns = new Set<string>();
+    headers.forEach((h) => {
+      if (HEADER_MAP[h]) recognizedColumns.add(HEADER_MAP[h]);
+    });
+
+    const parsedRows = dataRows.map((row, index) => {
       const data: ParsedRow['data'] = {};
       headers.forEach((header, colIndex) => {
         const mappedKey = HEADER_MAP[header];
@@ -150,5 +180,16 @@ export class ExcelParserService {
       });
       return { rowNumber: index + 2, data };
     }).filter((row) => Object.keys(row.data).length > 0);
+
+    if (parsedRows.length === 0) {
+      if (recognizedColumns.size === 0) {
+        const expectedColumns = ['Adviser', 'Adviser Phone', 'Client', 'Policy', 'Renewal Date'];
+        throw new BadRequestException(
+          `No recognized columns found. Your file must have columns named: ${expectedColumns.join(', ')}. The optional column is: Premium.`,
+        );
+      }
+    }
+
+    return parsedRows;
   }
 }

@@ -45,12 +45,14 @@ export class UploadService {
     const parsedRows = this.parser.parseFile(fileBuffer, originalname);
 
     if (parsedRows.length === 0) {
-      throw new InternalServerErrorException('No rows found in the uploaded file');
+      throw new InternalServerErrorException(
+        'No recognized data found in the uploaded file. Please ensure your spreadsheet contains the required columns: Adviser, Adviser Phone, Client, Policy, and Renewal Date.',
+      );
     }
 
     if (parsedRows.length > 10000) {
       throw new BadRequestException(
-        `File contains ${parsedRows.length} data rows. Maximum allowed is 10,000 rows.`,
+        `This file contains ${parsedRows.length.toLocaleString()} rows. The maximum is 10,000 rows. Please split your data into smaller files.`,
       );
     }
 
@@ -90,9 +92,9 @@ export class UploadService {
           now.toLocaleString('en-CA', { timeZone: 'Asia/Singapore' }).split(',')[0] + 'T00:00:00+08:00',
         );
         if (isNaN(date.getTime())) {
-          errors.push('Renewal date is not a valid date');
+          errors.push('This date is not valid. Use a real date like 2026-08-15.');
         } else if (date < todaySg) {
-          errors.push('Renewal date must not be in the past');
+          errors.push(`This renewal date (${row.data.renewalDate}) is in the past. Please use a future date.`);
         }
       }
 

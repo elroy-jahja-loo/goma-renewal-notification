@@ -15,19 +15,20 @@ export class FileValidationPipe implements PipeTransform {
 
   transform(file: Express.Multer.File | undefined): Express.Multer.File {
     if (!file) {
-      throw new BadRequestException('No file uploaded');
+      throw new BadRequestException('No file was selected. Please choose a .xlsx or .csv file to upload.');
     }
 
     if (file.size > this.maxSize) {
+      const sizeMB = (file.size / 1024 / 1024).toFixed(1);
       throw new BadRequestException(
-        `File size exceeds the maximum allowed size of 10MB`,
+        `File is too large (${sizeMB} MB). Maximum file size is 10 MB.`,
       );
     }
 
     const extension = file.originalname.split('.').pop()?.toLowerCase();
     if (!extension || !['xlsx', 'xls', 'csv'].includes(extension)) {
       throw new BadRequestException(
-        'Invalid file type. Only .xlsx, .xls, and .csv files are allowed',
+        `"${file.originalname}" is not a supported file type. Please upload a .xlsx, .xls, or .csv file.`,
       );
     }
 
