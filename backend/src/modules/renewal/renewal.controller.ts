@@ -2,9 +2,9 @@ import { Controller, Get, HttpCode, HttpStatus, Param, Query, Res } from '@nestj
 import { ApiTags, ApiOperation, ApiQuery, ApiResponse, ApiParam } from '@nestjs/swagger';
 import type { Response } from 'express';
 import { RenewalService } from './renewal.service';
-import type { RenewalFilterDto } from './dto/renewal-filter.dto';
+import { RenewalFilterDto } from './dto/renewal-filter.dto';
 import { RenewalStatus, SortField } from './dto/renewal-filter.dto';
-import type { RenewalPaginatedResponse } from './dto/renewal-response.dto';
+import { RenewalPaginatedResponse } from './dto/renewal-response.dto';
 
 @ApiTags('Renewals')
 @Controller('api')

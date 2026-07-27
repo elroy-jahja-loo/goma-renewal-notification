@@ -76,11 +76,11 @@ export class ExcelParserService {
   parseFile(fileBuffer: Buffer, filename: string): ParsedRow[] {
     const extension = filename.split('.').pop()?.toLowerCase();
 
-    if (extension === 'csv') {
-      return this.parseCsv(fileBuffer);
-    }
     if (extension === 'xlsx' || extension === 'xls') {
       return this.parseXlsx(fileBuffer);
+    }
+    if (extension === 'csv') {
+      return this.parseCsv(fileBuffer);
     }
 
     throw new BadRequestException(
@@ -89,6 +89,12 @@ export class ExcelParserService {
   }
 
   private parseXlsx(buffer: Buffer): ParsedRow[] {
+    const magic = buffer[0];
+    if (magic !== 0x50) {
+      throw new BadRequestException(
+        'This file is not a valid Excel file. It may be corrupted or a different format saved with the wrong extension.',
+      );
+    }
     let workbook;
     try {
       workbook = XLSX.read(buffer, {

@@ -68,10 +68,10 @@ export class UploadService {
         client: row.data.client,
         policy: row.data.policy,
         renewalDate: row.data.renewalDate,
-        premium: row.data.premium
+        premium: row.data.premium !== undefined
           ? (() => {
-              const p = parseFloat(row.data.premium);
-              return (isNaN(p) || !isFinite(p)) ? undefined : p;
+              const p = parseFloat(row.data.premium!);
+              return (isNaN(p) || !isFinite(p)) ? NaN : p;
             })()
           : undefined,
       });
@@ -128,9 +128,9 @@ export class UploadService {
         client_name: row.data.client!,
         policy_name: row.data.policy!,
         renewal_date: row.data.renewalDate!,
-        premium: row.data.premium
+        premium: row.data.premium !== undefined
           ? (() => {
-              const p = parseFloat(row.data.premium);
+              const p = parseFloat(row.data.premium!);
               return (isNaN(p) || !isFinite(p)) ? null : p;
             })()
           : null,
