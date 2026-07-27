@@ -32,7 +32,7 @@ export default function Upload() {
         <p className="mt-2 text-gray-500">Upload your monthly renewal spreadsheet to notify advisers automatically</p>
       </div>
 
-      <BotConnection onConnected={() => setBotReady(true)} />
+      <BotConnection onConnected={() => setBotReady(true)} onDisconnected={() => setBotReady(false)} />
 
       <Card>
         <CardHeader>

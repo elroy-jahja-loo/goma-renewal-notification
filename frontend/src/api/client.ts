@@ -89,3 +89,7 @@ export async function processNow(): Promise<{ processed: number; message: string
   const { data } = await api.post('/renewals/process');
   return data;
 }
+
+export async function resetBot(): Promise<void> {
+  await api.post('/telegram/reset');
+}

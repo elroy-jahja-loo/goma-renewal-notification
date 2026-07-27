@@ -58,8 +58,10 @@ export class TelegramService {
       }
 
       const data = await res.json();
-      const results: Array<{ message?: { chat: { id: number } } }> =
-        data.result;
+      const results: Array<{
+        update_id: number;
+        message?: { chat: { id: number } };
+      }> = data.result;
 
       if (!results || results.length === 0) {
         this.logger.warn('No updates found from Telegram');
@@ -73,6 +75,10 @@ export class TelegramService {
         this.logger.warn('No chat ID found in most recent update');
         return null;
       }
+
+      await fetch(
+        `https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}/getUpdates?offset=${mostRecent.update_id + 1}`,
+      );
 
       await this.supabase.from('bot_config').upsert(
         {
@@ -124,5 +130,13 @@ export class TelegramService {
         instructions: 'Open @renewal_notification_agent_bot on Telegram and click Start.',
       };
     }
+  }
+
+  async reset(): Promise<void> {
+    await this.supabase
+      .from('bot_config')
+      .update({ chat_id: null, is_connected: false, updated_at: new Date().toISOString() })
+      .eq('id', 1);
+    this.logger.info('Bot connection reset');
   }
 }

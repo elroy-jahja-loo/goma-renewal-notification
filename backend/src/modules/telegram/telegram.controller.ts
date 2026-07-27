@@ -26,10 +26,6 @@ export class TelegramController {
     status: 201,
     description: 'Telegram chat detected and connected successfully',
   })
-  @ApiResponse({
-    status: 404,
-    description: 'No Telegram chat found to connect',
-  })
   async connect(): Promise<TelegramStatus> {
     const chatId = await this.telegramService.detectChatId();
 
@@ -42,5 +38,13 @@ export class TelegramController {
     }
 
     return { connected: true, chatId };
+  }
+
+  @Post('reset')
+  @ApiOperation({ summary: 'Reset bot connection to allow a new user to connect' })
+  @ApiResponse({ status: 204, description: 'Connection reset' })
+  async reset(): Promise<{ success: boolean }> {
+    await this.telegramService.reset();
+    return { success: true };
   }
 }

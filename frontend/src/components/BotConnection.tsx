@@ -1,15 +1,16 @@
 import { useState, useEffect } from 'react';
-import { getBotStatus, connectBot } from '../api/client';
+import { getBotStatus, connectBot, resetBot } from '../api/client';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
 import { Button } from './ui/button';
 import { Badge } from './ui/badge';
-import { Loader2, CheckCircle2, AlertCircle } from 'lucide-react';
+import { Loader2, CheckCircle2, AlertCircle, RefreshCw } from 'lucide-react';
 import { toast } from 'sonner';
 
-export default function BotConnection({ onConnected }: { onConnected: () => void }) {
+export default function BotConnection({ onConnected, onDisconnected }: { onConnected: () => void; onDisconnected: () => void }) {
   const [status, setStatus] = useState<'loading' | 'connected' | 'disconnected'>('loading');
   const [chatId, setChatId] = useState('');
   const [connecting, setConnecting] = useState(false);
+  const [resetting, setResetting] = useState(false);
 
   useEffect(() => {
     checkStatus();
@@ -24,6 +25,7 @@ export default function BotConnection({ onConnected }: { onConnected: () => void
         onConnected();
       } else {
         setStatus('disconnected');
+        onDisconnected();
       }
     } catch {
       setStatus('disconnected');
@@ -49,6 +51,21 @@ export default function BotConnection({ onConnected }: { onConnected: () => void
     }
   }
 
+  async function handleReset() {
+    setResetting(true);
+    try {
+      await resetBot();
+      setStatus('disconnected');
+      setChatId('');
+      onDisconnected();
+      toast.success('Bot disconnected. A new user can now connect.');
+    } catch {
+      toast.error('Failed to reset connection.');
+    } finally {
+      setResetting(false);
+    }
+  }
+
   if (status === 'loading') {
     return (
       <Card>
@@ -63,10 +80,16 @@ export default function BotConnection({ onConnected }: { onConnected: () => void
   if (status === 'connected') {
     return (
       <Card className="border-emerald-200 bg-emerald-50">
-        <CardContent className="flex items-center gap-3 py-4">
-          <CheckCircle2 className="h-5 w-5 text-emerald-600" />
-          <span className="text-emerald-800 font-medium">Bot Connected</span>
-          <Badge variant="success">{chatId}</Badge>
+        <CardContent className="flex items-center justify-between py-4">
+          <div className="flex items-center gap-3">
+            <CheckCircle2 className="h-5 w-5 text-emerald-600" />
+            <span className="text-emerald-800 font-medium">Bot Connected</span>
+            <Badge variant="success">{chatId}</Badge>
+          </div>
+          <Button variant="ghost" size="sm" onClick={handleReset} disabled={resetting}>
+            {resetting ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-1 h-4 w-4" />}
+            {resetting ? 'Resetting...' : 'Reconnect'}
+          </Button>
         </CardContent>
       </Card>
     );
