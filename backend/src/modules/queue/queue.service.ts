@@ -23,19 +23,27 @@ export class QueueService implements OnModuleDestroy {
       connection: {
         url: process.env.REDIS_URL,
         connectTimeout: 10000,
-        maxRetriesPerRequest: null,
+        enableOfflineQueue: false,
+        maxRetriesPerRequest: 3,
         retryStrategy(times: number) {
           return Math.min(times * 200, 5000);
         },
       },
     });
 
+    this.queue.on('error', (err) => {
+      this.logger.error({ err: err.message }, 'Queue connection error');
+    });
+
     this.logger.info('BullMQ Queue initialized');
   }
 
   async addJobs(renewals: RenewalJobData[]): Promise<void> {
+    this.logger.info({ count: renewals.length }, 'Starting to add jobs to queue');
+
     for (const renewal of renewals) {
       try {
+        this.logger.info({ renewalId: renewal.id }, 'Adding job');
         await this.queue.add(
           'process-renewal',
           {
@@ -61,9 +69,9 @@ export class QueueService implements OnModuleDestroy {
           { renewalId: renewal.id, clientName: renewal.clientName },
           'Job added to queue',
         );
-      } catch (err) {
+      } catch (err: any) {
         this.logger.error(
-          { renewalId: renewal.id, err },
+          { renewalId: renewal.id, err: err?.message || err },
           'Failed to add job to queue',
         );
         throw err;

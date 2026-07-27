@@ -117,6 +117,7 @@ export class UploadController {
     thirtyDaysFromNow.setDate(thirtyDaysFromNow.getDate() + 30);
     const cutoff = thirtyDaysFromNow.toISOString().split('T')[0];
 
+    this.logger.log('Fetching pending renewals...');
     const { data: pending, error } = await supabase
       .from('renewals')
       .select('id, client_name, policy_name, renewal_date, premium, adviser_name, adviser_phone')
@@ -124,21 +125,32 @@ export class UploadController {
       .lte('renewal_date', cutoff)
       .order('created_at', { ascending: true });
 
+    this.logger.log(`DB query complete: ${pending?.length || 0} results, error: ${error?.message || 'none'}`);
+
     if (error || !pending || pending.length === 0) {
       return { processed: 0, message: 'No pending renewals within 30 days to process' };
     }
 
-    await this.queueService.addJobs(
-      pending.map((r: any) => ({
-        id: r.id,
-        clientName: r.client_name,
-        policyName: r.policy_name,
-        renewalDate: r.renewal_date,
-        premium: r.premium,
-        adviserName: r.adviser_name,
-        adviserPhone: r.adviser_phone,
-      })),
+    this.logger.log(`Enqueuing ${pending.length} jobs...`);
+
+    const timeout = new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error('Queue add timeout after 15s')), 15000),
     );
+
+    await Promise.race([
+      this.queueService.addJobs(
+        pending.map((r: any) => ({
+          id: r.id,
+          clientName: r.client_name,
+          policyName: r.policy_name,
+          renewalDate: r.renewal_date,
+          premium: r.premium,
+          adviserName: r.adviser_name,
+          adviserPhone: r.adviser_phone,
+        })),
+      ),
+      timeout,
+    ]);
 
     this.logger.log(`Manual process enqueued ${pending.length} renewals`);
     return { processed: pending.length, message: `${pending.length} renewals enqueued for processing` };
