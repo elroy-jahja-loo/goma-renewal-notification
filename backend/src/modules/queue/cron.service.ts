@@ -15,31 +15,38 @@ export class CronService implements OnModuleInit {
     this.pinoLogger.setContext(CronService.name);
   }
 
-  async onModuleInit(): Promise<void> {
-    const queue = this.queueService.getQueue();
-
-    await queue.add(
-      'daily-scan',
-      {},
-      {
-        repeat: {
-          pattern: '0 * * * *',
-        },
-        jobId: 'hourly-renewal-scan',
-        removeOnComplete: true,
-      },
-    );
-
-    this.pinoLogger.info('Hourly cron registered: 0 * * * * (every hour on the hour UTC)');
+  onModuleInit(): void {
+    setImmediate(async () => {
+      try {
+        const queue = this.queueService.getQueue();
+        await queue.add(
+          'daily-scan',
+          {},
+          {
+            repeat: { pattern: '0 * * * *' },
+            jobId: 'hourly-renewal-scan',
+            removeOnComplete: true,
+          },
+        );
+        this.pinoLogger.info('Hourly cron registered: 0 * * * * (every hour on the hour UTC)');
+      } catch (err) {
+        this.pinoLogger.warn({ err }, 'Failed to register hourly cron — will retry on next deploy');
+      }
+    });
   }
 
   async runDailyScan(): Promise<{ processed: number }> {
-    this.logger.log('Running daily renewal scan...');
+    this.logger.log('Running hourly scan for pending renewals within 30 days...');
+
+    const thirtyDaysFromNow = new Date();
+    thirtyDaysFromNow.setDate(thirtyDaysFromNow.getDate() + 30);
+    const cutoffDate = thirtyDaysFromNow.toISOString().split('T')[0];
 
     const { data: pendingRenewals, error } = await this.supabase
       .from('renewals')
       .select('id, client_name, policy_name, renewal_date, premium, adviser_name, adviser_phone')
       .eq('status', 'pending')
+      .lte('renewal_date', cutoffDate)
       .order('created_at', { ascending: true });
 
     if (error) {
@@ -66,7 +73,7 @@ export class CronService implements OnModuleInit {
       })),
     );
 
-    this.pinoLogger.info({ count: pendingRenewals.length }, 'Daily scan enqueued renewals');
+    this.pinoLogger.info({ count: pendingRenewals.length }, 'Hourly scan enqueued renewals');
     return { processed: pendingRenewals.length };
   }
 }
