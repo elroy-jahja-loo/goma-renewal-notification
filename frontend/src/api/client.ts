@@ -65,3 +65,8 @@ export async function connectBot(): Promise<BotStatus> {
   const { data } = await api.post('/telegram/connect');
   return data;
 }
+
+export async function processNow(): Promise<{ processed: number; message: string }> {
+  const { data } = await api.post('/renewals/process');
+  return data;
+}

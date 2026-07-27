@@ -4,6 +4,8 @@ import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 import { Logger } from '@nestjs/common';
 import { supabase } from './database/supabase';
 
+process.env.TZ = process.env.TZ || 'Asia/Singapore';
+
 async function runMigrations(): Promise<void> {
   const logger = new Logger('Migrations');
   try {

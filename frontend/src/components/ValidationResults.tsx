@@ -1,8 +1,9 @@
+import { useState } from 'react';
 import { Card, CardContent } from './ui/card';
 import { Button } from './ui/button';
-import { CheckCircle2, XCircle, Download, Bell } from 'lucide-react';
+import { CheckCircle2, XCircle, Download, Bell, Send, Loader2 } from 'lucide-react';
 import type { UploadResult } from '../api/client';
-import { downloadErrors } from '../api/client';
+import { downloadErrors, processNow } from '../api/client';
 import { toast } from 'sonner';
 
 interface Props {
@@ -10,6 +11,9 @@ interface Props {
 }
 
 export default function ValidationResults({ result }: Props) {
+  const [sending, setSending] = useState(false);
+  const [sent, setSent] = useState(false);
+
   async function handleDownload() {
     try {
       const blob = await downloadErrors(result.batchId);
@@ -21,6 +25,19 @@ export default function ValidationResults({ result }: Props) {
       URL.revokeObjectURL(url);
     } catch {
       toast.error('Failed to download error report');
+    }
+  }
+
+  async function handleSendNow() {
+    setSending(true);
+    try {
+      const res = await processNow();
+      setSent(true);
+      toast.success(res.message);
+    } catch {
+      toast.error('Failed to send notifications');
+    } finally {
+      setSending(false);
     }
   }
 
@@ -62,12 +79,34 @@ export default function ValidationResults({ result }: Props) {
         </Button>
       )}
 
-      <div className="flex items-center justify-center gap-2 rounded-lg bg-indigo-50 px-4 py-3">
-        <Bell className="h-5 w-5 text-indigo-600" />
-        <p className="text-sm font-medium text-indigo-700">
-          {result.validRows} notifications queued! Messages will be sent shortly.
-        </p>
-      </div>
+      {result.validRows > 0 && !sent && (
+        <Button onClick={handleSendNow} disabled={sending} className="w-full bg-indigo-600 hover:bg-indigo-700">
+          {sending ? (
+            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+          ) : (
+            <Send className="mr-2 h-4 w-4" />
+          )}
+          {sending ? 'Sending...' : 'Send Notifications Now'}
+        </Button>
+      )}
+
+      {sent && (
+        <div className="flex items-center justify-center gap-2 rounded-lg bg-emerald-50 px-4 py-3">
+          <Bell className="h-5 w-5 text-emerald-600" />
+          <p className="text-sm font-medium text-emerald-700">
+            Notifications sent! Check Telegram for {result.validRows} messages.
+          </p>
+        </div>
+      )}
+
+      {!sent && (
+        <div className="flex items-center justify-center gap-2 rounded-lg bg-indigo-50 px-4 py-3">
+          <Bell className="h-5 w-5 text-indigo-600" />
+          <p className="text-sm font-medium text-indigo-700">
+            {result.validRows} renewals stored. Click "Send Now" to notify advisers, or they'll be sent hourly.
+          </p>
+        </div>
+      )}
     </div>
   );
 }

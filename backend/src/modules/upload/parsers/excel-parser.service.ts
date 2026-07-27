@@ -27,6 +27,50 @@ const HEADER_MAP: Record<string, string> = {
   premium: 'premium',
 };
 
+function excelSerialToDate(serial: number): string {
+  const utcDays = Math.floor(serial - 25569);
+  const utcMs = utcDays * 86400000;
+  const date = new Date(utcMs);
+  const y = date.getUTCFullYear();
+  const m = String(date.getUTCMonth() + 1).padStart(2, '0');
+  const d = String(date.getUTCDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
+function normalizeDate(raw: string): string | null {
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+
+  const num = Number(trimmed);
+  if (!isNaN(num) && num > 40000 && num < 60000) {
+    return excelSerialToDate(num);
+  }
+
+  const ddmmyyyy = /^(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{4})$/.exec(trimmed);
+  if (ddmmyyyy) {
+    const d = ddmmyyyy[1].padStart(2, '0');
+    const m = ddmmyyyy[2].padStart(2, '0');
+    return `${ddmmyyyy[3]}-${m}-${d}`;
+  }
+
+  const monthNames =
+    /^(\d{1,2})\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+(\d{4})$/i.exec(trimmed);
+  if (monthNames) {
+    const months: Record<string, string> = {
+      jan: '01', feb: '02', mar: '03', apr: '04', may: '05', jun: '06',
+      jul: '07', aug: '08', sep: '09', oct: '10', nov: '11', dec: '12',
+    };
+    const d = monthNames[1].padStart(2, '0');
+    const m = months[monthNames[2].toLowerCase().slice(0, 3)];
+    return `${monthNames[3]}-${m}-${d}`;
+  }
+
+  const iso = /^\d{4}-\d{2}-\d{2}$/.exec(trimmed);
+  if (iso) return trimmed;
+
+  return null;
+}
+
 @Injectable()
 export class ExcelParserService {
   parseFile(fileBuffer: Buffer, filename: string): ParsedRow[] {
@@ -49,7 +93,7 @@ export class ExcelParserService {
       throw new BadRequestException('Excel file contains no sheets');
     }
     const sheet = workbook.Sheets[sheetName];
-    const rows: any[][] = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
+    const rows: any[][] = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '', raw: false });
 
     if (rows.length < 2) {
       throw new BadRequestException('Excel file is empty or has no data rows');
@@ -86,7 +130,15 @@ export class ExcelParserService {
         if (mappedKey) {
           const value = row[colIndex];
           if (value !== undefined && value !== null && String(value).trim() !== '') {
-            data[mappedKey as keyof ParsedRow['data']] = String(value).trim();
+            const raw = String(value).trim();
+            if (mappedKey === 'renewalDate') {
+              const normalized = normalizeDate(raw);
+              if (normalized) {
+                data.renewalDate = normalized;
+              }
+            } else {
+              data[mappedKey as keyof ParsedRow['data']] = raw;
+            }
           }
         }
       });

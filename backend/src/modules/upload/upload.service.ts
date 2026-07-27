@@ -6,7 +6,6 @@ import { SupabaseClient } from '@supabase/supabase-js';
 import { RenewalRowDto } from '../renewal/dto/renewal-row.dto';
 import { UploadResponse } from './dto/upload-response.dto';
 import { ExcelParserService } from './parsers/excel-parser.service';
-import { QueueService } from '../queue/queue.service';
 
 interface ValidRenewal {
   client_name: string;
@@ -33,7 +32,6 @@ export class UploadService {
 
   constructor(
     private readonly parser: ExcelParserService,
-    private readonly queueService: QueueService,
     @Inject('SUPABASE_CLIENT') private readonly supabase: SupabaseClient,
   ) {}
 
@@ -75,12 +73,14 @@ export class UploadService {
       }
 
       if (row.data.renewalDate) {
-        const date = new Date(row.data.renewalDate);
-        const today = new Date();
-        today.setHours(0, 0, 0, 0);
+        const date = new Date(row.data.renewalDate + 'T00:00:00+08:00');
+        const now = new Date();
+        const todaySg = new Date(
+          now.toLocaleString('en-CA', { timeZone: 'Asia/Singapore' }).split(',')[0] + 'T00:00:00+08:00',
+        );
         if (isNaN(date.getTime())) {
           errors.push('Renewal date is not a valid date');
-        } else if (date < today) {
+        } else if (date < todaySg) {
           errors.push('Renewal date must not be in the past');
         }
       }
@@ -157,29 +157,6 @@ export class UploadService {
       if (insertError) {
         this.logger.error('Failed to insert valid rows', insertError);
         throw new InternalServerErrorException('Failed to save renewal data');
-      }
-
-      const { data: insertedRows, error: fetchError } = await this.supabase
-        .from('renewals')
-        .select('id, client_name, policy_name, renewal_date, premium, adviser_name, adviser_phone')
-        .eq('upload_batch', batchId)
-        .eq('status', 'pending');
-
-      if (fetchError) {
-        this.logger.error('Failed to fetch inserted rows for queue', fetchError);
-      } else if (insertedRows && insertedRows.length > 0) {
-        await this.queueService.addJobs(
-          insertedRows.map((r: any) => ({
-            id: r.id,
-            clientName: r.client_name,
-            policyName: r.policy_name,
-            renewalDate: r.renewal_date,
-            premium: r.premium,
-            adviserName: r.adviser_name,
-            adviserPhone: r.adviser_phone,
-          })),
-        );
-        this.logger.log(`Enqueued ${insertedRows.length} jobs`);
       }
     }
 

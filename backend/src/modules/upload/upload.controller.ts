@@ -16,6 +16,7 @@ import type { Response, Express } from 'express';
 import { FileValidationPipe } from '../../common/pipes/file-validation.pipe';
 import { UploadService } from './upload.service';
 import type { UploadResponse } from './dto/upload-response.dto';
+import { QueueService } from '../queue/queue.service';
 import { supabase } from '../../database/supabase';
 
 @ApiTags('Upload')
@@ -23,7 +24,10 @@ import { supabase } from '../../database/supabase';
 export class UploadController {
   private readonly logger = new Logger(UploadController.name);
 
-  constructor(private readonly uploadService: UploadService) {}
+  constructor(
+    private readonly uploadService: UploadService,
+    private readonly queueService: QueueService,
+  ) {}
 
   @Post('upload')
   @HttpCode(HttpStatus.OK)
@@ -98,6 +102,43 @@ export class UploadController {
       `attachment; filename="error-report-${batchId}.csv"`,
     );
     res.send(csvContent);
+  }
+
+  @Post('process')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Trigger immediate processing of pending renewals within 30 days' })
+  @ApiResponse({ status: 200, description: 'Renewals enqueued' })
+  async processNow(): Promise<{ processed: number; message: string }> {
+    this.logger.log('Manual process triggered');
+    const thirtyDaysFromNow = new Date();
+    thirtyDaysFromNow.setDate(thirtyDaysFromNow.getDate() + 30);
+    const cutoff = thirtyDaysFromNow.toISOString().split('T')[0];
+
+    const { data: pending, error } = await supabase
+      .from('renewals')
+      .select('id, client_name, policy_name, renewal_date, premium, adviser_name, adviser_phone')
+      .eq('status', 'pending')
+      .lte('renewal_date', cutoff)
+      .order('created_at', { ascending: true });
+
+    if (error || !pending || pending.length === 0) {
+      return { processed: 0, message: 'No pending renewals within 30 days to process' };
+    }
+
+    await this.queueService.addJobs(
+      pending.map((r: any) => ({
+        id: r.id,
+        clientName: r.client_name,
+        policyName: r.policy_name,
+        renewalDate: r.renewal_date,
+        premium: r.premium,
+        adviserName: r.adviser_name,
+        adviserPhone: r.adviser_phone,
+      })),
+    );
+
+    this.logger.log(`Manual process enqueued ${pending.length} renewals`);
+    return { processed: pending.length, message: `${pending.length} renewals enqueued for processing` };
   }
 
   private extractFieldFromError(error: string): string {

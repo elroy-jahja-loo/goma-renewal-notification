@@ -17,8 +17,11 @@ describe('RenewalProcessor', () => {
   let mockRateLimiterService: any;
   let mockSupabase: any;
   let mockLogger: any;
+  let singleCallCount = 0;
 
   beforeEach(async () => {
+    singleCallCount = 0;
+
     mockAiService = {
       generateMessage: jest
         .fn()
@@ -38,9 +41,12 @@ describe('RenewalProcessor', () => {
       update: jest.fn().mockReturnThis(),
       eq: jest.fn().mockReturnThis(),
       select: jest.fn().mockReturnThis(),
-      single: jest.fn().mockResolvedValue({
-        data: { chat_id: '123456789' },
-        error: null,
+      single: jest.fn().mockImplementation(() => {
+        singleCallCount++;
+        if (singleCallCount === 1) {
+          return Promise.resolve({ data: { status: 'pending' }, error: null });
+        }
+        return Promise.resolve({ data: { chat_id: '123456789' }, error: null });
       }),
       order: jest.fn().mockReturnThis(),
     };
@@ -124,10 +130,9 @@ describe('RenewalProcessor', () => {
   });
 
   it('should mark failed when no chat_id configured', async () => {
-    mockSupabase.single.mockResolvedValueOnce({
-      data: { chat_id: null },
-      error: null,
-    });
+    mockSupabase.single
+      .mockResolvedValueOnce({ data: { status: 'pending' }, error: null })
+      .mockResolvedValueOnce({ data: { chat_id: null }, error: null });
 
     const mockJob = {
       id: 'job-3',

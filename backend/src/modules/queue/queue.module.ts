@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { QueueService } from './queue.service';
 import { RenewalProcessor } from './queue.processor';
 import { RateLimiterService } from './rate-limiter.service';
+import { CronService } from './cron.service';
 import { AiModule } from '../ai/ai.module';
 import { TelegramModule } from '../telegram/telegram.module';
 import { supabase } from '../../database/supabase';
@@ -12,6 +13,7 @@ import { supabase } from '../../database/supabase';
     QueueService,
     RenewalProcessor,
     RateLimiterService,
+    CronService,
     {
       provide: 'SUPABASE_CLIENT',
       useValue: supabase,

@@ -8,6 +8,7 @@ import { RenewalController } from '../../src/modules/renewal/renewal.controller'
 import { UploadController } from '../../src/modules/upload/upload.controller';
 import { RenewalService } from '../../src/modules/renewal/renewal.service';
 import { UploadService } from '../../src/modules/upload/upload.service';
+import { QueueService } from '../../src/modules/queue/queue.service';
 
 const request = require('supertest');
 
@@ -55,11 +56,16 @@ describe('RenewalController (Integration)', () => {
       }),
     };
 
+    const mockQueueService = {
+      addJobs: jest.fn().mockResolvedValue(undefined),
+    };
+
     const module: TestingModule = await Test.createTestingModule({
       controllers: [RenewalController, UploadController],
       providers: [
         { provide: RenewalService, useValue: mockRenewalService },
         { provide: UploadService, useValue: mockUploadService },
+        { provide: QueueService, useValue: mockQueueService },
       ],
     }).compile();
 
