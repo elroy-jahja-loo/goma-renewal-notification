@@ -23,12 +23,12 @@ export class CronService implements OnModuleInit {
           'daily-scan',
           {},
           {
-            repeat: { pattern: '*/30 * * * *' },
+            repeat: { pattern: '*/5 * * * *' },
             jobId: 'hourly-renewal-scan',
             removeOnComplete: true,
           },
         );
-        this.pinoLogger.info('Cron registered: */30 * * * * (every 30 minutes)');
+        this.pinoLogger.info('Cron registered: */5 * * * * (every 5 minutes)');
       } catch (err) {
         this.pinoLogger.warn({ err }, 'Failed to register hourly cron — will retry on next deploy');
       }

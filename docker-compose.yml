@@ -1,0 +1,46 @@
+version: '3.8'
+
+services:
+  redis:
+    image: redis:7-alpine
+    container_name: goma-redis
+    ports:
+      - '6379:6379'
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: goma-backend
+    ports:
+      - '3000:3000'
+    env_file:
+      - .env
+    environment:
+      - REDIS_URL=redis://redis:6379
+      - NODE_ENV=development
+      - PORT=3000
+      - LOG_LEVEL=info
+      - CORS_ORIGIN=http://localhost:5173
+      - TZ=Asia/Singapore
+    depends_on:
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./backend/src:/app/src
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: goma-frontend
+    ports:
+      - '5173:5173'
+    depends_on:
+      - backend
+    environment:
+      - VITE_API_URL=http://localhost:3000/api
