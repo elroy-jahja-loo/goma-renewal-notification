@@ -158,7 +158,7 @@ export class RenewalProcessor implements OnModuleInit, OnModuleDestroy {
   }
 
   private async handleDailyScan(): Promise<void> {
-    this.logger.info('Running hourly scan for pending renewals within 30 days...');
+    this.logger.info('Running scheduled scan for pending renewals within 30 days...');
 
     const thirtyDaysFromNow = new Date();
     thirtyDaysFromNow.setDate(thirtyDaysFromNow.getDate() + 30);
