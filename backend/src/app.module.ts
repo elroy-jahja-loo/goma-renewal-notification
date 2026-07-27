@@ -1,7 +1,8 @@
 import { Module, ValidationPipe } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
-import { APP_PIPE, APP_FILTER, APP_INTERCEPTOR } from '@nestjs/core';
+import { APP_PIPE, APP_FILTER, APP_INTERCEPTOR, APP_GUARD } from '@nestjs/core';
 import { LoggerModule } from 'nestjs-pino';
+import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
 import * as Joi from 'joi';
 
 import { appConfig } from './config/app.config';
@@ -13,6 +14,7 @@ import { telegramConfig } from './config/telegram.config';
 import { HttpExceptionFilter } from './common/filters/http-exception.filter';
 import { LoggingInterceptor } from './common/interceptors/logging.interceptor';
 import { TimingInterceptor } from './common/interceptors/timing.interceptor';
+import { AuthGuard } from './common/guards/auth.guard';
 
 import { RenewalModule } from './modules/renewal/renewal.module';
 import { UploadModule } from './modules/upload/upload.module';
@@ -45,6 +47,23 @@ import { TelegramModule } from './modules/telegram/telegram.module';
           : undefined,
       },
     }),
+    ThrottlerModule.forRoot([
+      {
+        name: 'short',
+        ttl: 1000,
+        limit: 3,
+      },
+      {
+        name: 'medium',
+        ttl: 10000,
+        limit: 20,
+      },
+      {
+        name: 'long',
+        ttl: 60000,
+        limit: 100,
+      },
+    ]),
     RenewalModule,
     UploadModule,
     AiModule,
@@ -61,6 +80,8 @@ import { TelegramModule } from './modules/telegram/telegram.module';
           forbidNonWhitelisted: true,
         }),
     },
+    { provide: APP_GUARD, useClass: AuthGuard },
+    { provide: APP_GUARD, useClass: ThrottlerGuard },
     { provide: APP_FILTER, useClass: HttpExceptionFilter },
     { provide: APP_INTERCEPTOR, useClass: LoggingInterceptor },
     { provide: APP_INTERCEPTOR, useClass: TimingInterceptor },

@@ -104,7 +104,7 @@ export class TelegramService {
         return {
           connected: false,
           instructions:
-            'Open @GomaRenewalsBot on Telegram and click Start.',
+            'Open @renewal_notification_agent_bot on Telegram and click Start.',
         };
       }
 
@@ -115,13 +115,13 @@ export class TelegramService {
       return {
         connected: false,
         instructions:
-          'Open @GomaRenewalsBot on Telegram and click Start.',
+          'Open @renewal_notification_agent_bot on Telegram and click Start.',
       };
     } catch (error) {
       this.logger.error(error, 'getStatus exception');
       return {
         connected: false,
-        instructions: 'Open @GomaRenewalsBot on Telegram and click Start.',
+        instructions: 'Open @renewal_notification_agent_bot on Telegram and click Start.',
       };
     }
   }

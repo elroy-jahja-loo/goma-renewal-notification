@@ -1,4 +1,4 @@
-import { Injectable, Inject, InternalServerErrorException, Logger } from '@nestjs/common';
+import { Injectable, Inject, InternalServerErrorException, BadRequestException, Logger } from '@nestjs/common';
 import { plainToInstance } from 'class-transformer';
 import { validate } from 'class-validator';
 import { createHash } from 'crypto';
@@ -48,6 +48,12 @@ export class UploadService {
       throw new InternalServerErrorException('No rows found in the uploaded file');
     }
 
+    if (parsedRows.length > 10000) {
+      throw new BadRequestException(
+        `File contains ${parsedRows.length} data rows. Maximum allowed is 10,000 rows.`,
+      );
+    }
+
     const validRows: ValidRenewal[] = [];
     const invalidRows: FailedRenewal[] = [];
     const seenHashes = new Set<string>();
@@ -60,7 +66,12 @@ export class UploadService {
         client: row.data.client,
         policy: row.data.policy,
         renewalDate: row.data.renewalDate,
-        premium: row.data.premium ? parseFloat(row.data.premium) : undefined,
+        premium: row.data.premium
+          ? (() => {
+              const p = parseFloat(row.data.premium);
+              return (isNaN(p) || !isFinite(p)) ? undefined : p;
+            })()
+          : undefined,
       });
 
       const validationErrors = await validate(dto);
@@ -115,7 +126,12 @@ export class UploadService {
         client_name: row.data.client!,
         policy_name: row.data.policy!,
         renewal_date: row.data.renewalDate!,
-        premium: row.data.premium ? parseFloat(row.data.premium) : null,
+        premium: row.data.premium
+          ? (() => {
+              const p = parseFloat(row.data.premium);
+              return (isNaN(p) || !isFinite(p)) ? null : p;
+            })()
+          : null,
         adviser_name: row.data.adviser!,
         adviser_phone: row.data.adviserPhone!,
         status: 'pending',

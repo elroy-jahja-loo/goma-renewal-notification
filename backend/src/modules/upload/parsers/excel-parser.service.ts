@@ -87,7 +87,13 @@ export class ExcelParserService {
   }
 
   private parseXlsx(buffer: Buffer): ParsedRow[] {
-    const workbook = XLSX.read(buffer, { type: 'buffer' });
+    const workbook = XLSX.read(buffer, {
+      type: 'buffer',
+      sheetRows: 10001,
+      cellFormula: false,
+      cellStyles: false,
+      cellDates: false,
+    });
     const sheetName = workbook.SheetNames[0];
     if (!sheetName) {
       throw new BadRequestException('Excel file contains no sheets');

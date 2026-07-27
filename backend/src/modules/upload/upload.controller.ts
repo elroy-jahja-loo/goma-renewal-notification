@@ -12,6 +12,7 @@ import {
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { ApiTags, ApiOperation, ApiConsumes, ApiBody, ApiParam, ApiResponse } from '@nestjs/swagger';
+import { Throttle } from '@nestjs/throttler';
 import type { Response, Express } from 'express';
 import { FileValidationPipe } from '../../common/pipes/file-validation.pipe';
 import { UploadService } from './upload.service';
@@ -31,6 +32,7 @@ export class UploadController {
 
   @Post('upload')
   @HttpCode(HttpStatus.OK)
+  @Throttle({ short: { limit: 3, ttl: 1000 } })
   @UseInterceptors(FileInterceptor('file'))
   @ApiOperation({ summary: 'Upload a renewal Excel/CSV file' })
   @ApiConsumes('multipart/form-data')
@@ -106,6 +108,7 @@ export class UploadController {
 
   @Post('process')
   @HttpCode(HttpStatus.OK)
+  @Throttle({ short: { limit: 5, ttl: 1000 } })
   @ApiOperation({ summary: 'Trigger immediate processing of pending renewals within 30 days' })
   @ApiResponse({ status: 200, description: 'Renewals enqueued' })
   async processNow(): Promise<{ processed: number; message: string }> {

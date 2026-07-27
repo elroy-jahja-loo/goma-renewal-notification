@@ -80,7 +80,7 @@ export default function BotConnection({ onConnected }: { onConnected: () => void
           Connect Telegram Bot
         </CardTitle>
         <CardDescription>
-          1. Open <strong>@GomaRenewalsBot</strong> on Telegram<br />
+          1. Open <strong>@renewal_notification_agent_bot</strong> on Telegram<br />
           2. Click <strong>Start</strong><br />
           3. Then click the button below
         </CardDescription>

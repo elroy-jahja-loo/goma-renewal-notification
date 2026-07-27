@@ -1,5 +1,7 @@
 # Goma AI — Master Execution Plan
 
+> **Status: Implemented** | Backend: `https://goma-backend.onrender.com` | Frontend: `https://goma-frontend.vercel.app` | Bot: `@renewal_notification_agent_bot` | Tests: 29/29 passing
+
 ## Table of Contents
 1. [Prerequisites (Manual Steps — Do First)](#prerequisites)
 2. [Architecture Overview](#architecture)
@@ -541,7 +543,7 @@ CREATE TABLE failed_renewals (
 
 ---
 
-## <a id="data-flow"></a>5. Data Flow
+## <a id="data-flow"></a>5. Data Flow (Updated — Cron-Based Sending)
 
 ```
 User uploads Excel
@@ -554,49 +556,63 @@ User uploads Excel
          │
          ▼
 ┌─────────────────┐
-│ UploadService   │  1. Parse file (xlsx/csv-parse)
-│                 │  2. Validate each row (class-validator)
-│                 │  3. Hash each valid row for dedup
-│                 │  4. Insert valid → renewals table
-│                 │  5. Insert invalid → failed_renewals table
-│                 │  6. Return summary response
+│ UploadService   │  1. Parse file (SheetJS xlsx / csv-parse)
+│                 │  2. Normalize dates (serial, DD/MM/YYYY, Month YYYY → YYYY-MM-DD)
+│                 │  3. Validate each row (class-validator + SG timezone date check)
+│                 │  4. SHA256 hash for dedup
+│                 │  5. Insert valid → renewals (status: pending)
+│                 │  6. Insert invalid → failed_renewals with error details
+│                 │  7. Return summary (NO immediate queue)
 └────────┬────────┘
          │
-         ▼
+         │  Renewals stored as pending. Nothing sent yet.
+         │
+    ┌────┴────┐
+    │         │
+    ▼         ▼
+┌──────────────┐    ┌──────────────────────┐
+│ Manual:      │    │ Auto: Cron (hourly)  │
+│ "Send Now"   │    │ 0 * * * * UTC        │
+│ button       │    │                      │
+│ POST /process│    │ handleDailyScan()    │
+└──────┬───────┘    └──────────┬───────────┘
+       │                       │
+       │  Both query:          │
+       │  SELECT FROM renewals │
+       │  WHERE status='pending'│
+       │  AND renewal_date <=  │
+       │  today + 30 days      │
+       │                       │
+       └───────┬───────────────┘
+               │
+               ▼
 ┌─────────────────┐
-│ QueueService    │  1. For each valid renewal, add BullMQ job
-│                 │     (delayed 5s to allow for review)
-│                 │  2. Job data: { renewalId, adviserName, ... }
+│ QueueService    │  BullMQ.addJobs() with delay: 5000,
+│                 │  attempts: 3, exponential backoff
 └────────┬────────┘
          │
          ▼
 ┌─────────────────┐     ┌──────────────────┐
-│ QueueProcessor  │────▶│ AiService        │
-│ (BullMQ Worker) │     │  generateMessage()│
-└────────┬────────┘     └──────────────────┘
-         │                       │
-         │              OpenAI gpt-4o-mini
-         │              "Write WhatsApp reminder..."
-         │                       │
-         │              Returns formatted message
-         │                       │
-         ▼                       ▼
-┌─────────────────┐
-│ TelegramService │  POST bot{token}/sendMessage
-│  .send()        │  to adviser's chat_id
-└────────┬────────┘
-         │
-         ▼
-    Update status:
-    success → 'sent'
-    failure → 'failed' + retry (up to 3x, exponential backoff)
-
-After upload, dashboard refreshes:
-┌─────────────────┐
-│ GET /api/renewals│  Filterable table of all renewals
-│ Dashboard API    │  with real-time status
+│ RenewalProcessor│────▶│ AiService         │
+│ (BullMQ Worker) │     │  generateMessage() │
+│                 │     │  GPT-4o-mini       │
+│ 1. Status guard │     └──────────────────┘
+│    (skip if not │              │
+│     pending)    │     Returns formatted text
+│ 2. Status →     │              │
+│    processing   │              ▼
+│ 3. Rate limit   │     ┌──────────────────┐
+│ 4. AI message   │────▶│ TelegramService   │
+│ 5. Telegram send│     │  sendMessage()    │
+│ 6. Status →     │     │  POST bot/sendMsg │
+│    sent/failed  │     └──────────────────┘
 └─────────────────┘
 ```
+
+**Triple-layer duplicate prevention:**
+1. Upload: SHA256 hash → `ON CONFLICT DO NOTHING`
+2. Cron: `WHERE status = 'pending'` — sent rows invisible
+3. Processor: reads current DB status before sending, skips if not pending
 
 ---
 
@@ -870,6 +886,8 @@ README.md
 
 ## <a id="env-vars"></a>9. Environment Variables
 
+## <a id="env-vars"></a>9. Environment Variables
+
 ### `.env` (gitignored — local dev only)
 ```bash
 # ── Supabase
@@ -890,6 +908,7 @@ NODE_ENV=development
 PORT=3000
 LOG_LEVEL=info
 CORS_ORIGIN=http://localhost:5173
+TZ=Asia/Singapore
 ```
 
 ### `.env.example` (committed to repo)
@@ -903,6 +922,7 @@ NODE_ENV=development
 PORT=3000
 LOG_LEVEL=info
 CORS_ORIGIN=http://localhost:5173
+TZ=Asia/Singapore
 ```
 
 ### Render Environment Variables (copy all of these)
@@ -916,6 +936,12 @@ NODE_ENV=production
 PORT=3000
 LOG_LEVEL=info
 CORS_ORIGIN=https://your-frontend.vercel.app
+TZ=Asia/Singapore
+```
+
+### Vercel Environment Variable (just one)
+```
+VITE_API_URL=https://goma-backend.onrender.com/api
 ```
 
 ### Vercel Environment Variable (just one)

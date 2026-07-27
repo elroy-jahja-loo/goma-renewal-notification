@@ -1,9 +1,12 @@
 import { Controller, Get, Post } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
+import { Throttle } from '@nestjs/throttler';
 import { TelegramService, TelegramStatus } from './telegram.service';
+import { Public } from '../../common/decorators/public.decorator';
 
 @ApiTags('Telegram')
 @Controller('api/telegram')
+@Public()
 export class TelegramController {
   constructor(private readonly telegramService: TelegramService) {}
 
@@ -34,7 +37,7 @@ export class TelegramController {
       return {
         connected: false,
         instructions:
-          'No messages found. Open @GomaRenewalsBot on Telegram and click Start, then try again.',
+          'No messages found. Open @renewal_notification_agent_bot on Telegram and click Start, then try again.',
       };
     }
 
