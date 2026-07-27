@@ -2,6 +2,8 @@
 
 An internal automation tool for financial advisory companies. Operations teams upload monthly policy renewal spreadsheets via a web UI, and the system automatically generates AI-crafted reminder messages delivered to advisers via Telegram.
 
+---
+
 ## Live Demo
 
 | Service | URL |
@@ -13,99 +15,181 @@ An internal automation tool for financial advisory companies. Operations teams u
 
 **Demo credentials:** `user@example.com` / `password`
 
-> **Note on Render free tier:** The backend sleeps after 15 minutes of inactivity. To keep it awake for the demo, a free [UptimeRobot](https://uptimerobot.com) monitor pings the health endpoint every 5 minutes. On first visit after sleep, the frontend shows "Waking up server..." for 30-45 seconds, then everything works normally.
+> **Note on Render free tier:** The backend sleeps after 15 minutes of inactivity. A free [UptimeRobot](https://uptimerobot.com) monitor pings the health endpoint every 5 minutes to keep it awake. On first visit after sleep, the frontend shows "Waking up server..." for 30-45 seconds, then everything works normally.
 
-## Quick Start
+---
 
-### Option A — Use the Live Demo (No Setup)
+## 1. Setup
+
+### Option A — Live Demo (No Setup Required)
 
 1. Open `@renewal_notification_agent_bot` on Telegram → click **Start**
 2. Go to https://goma-frontend.vercel.app → log in → click **Connect Telegram**
-3. Upload your Excel/CSV file → click **Send All Pending**
-4. Telegram notifications arrive within seconds
+3. Upload your Excel/CSV file → notifications arrive automatically
 
 ### Option B — Docker Compose (Local)
 
 ```bash
 cp .env.example .env
-# Fill in your Supabase URL, Supabase service key, OpenAI key, and Telegram bot token
+# Fill in: SUPABASE_URL, SUPABASE_SERVICE_KEY, OPENAI_API_KEY, TELEGRAM_BOT_TOKEN
+# Redis runs locally in a container — no Upstash account needed
 docker compose up
-# Frontend: http://localhost:5173 | API: http://localhost:3000
+# Frontend: http://localhost:5173 | API: http://localhost:3000 | Swagger: http://localhost:3000/api/docs
 ```
 
-**Environment variables needed:**
+### Environment Variables
+
 ```bash
 SUPABASE_URL=https://xxx.supabase.co
-SUPABASE_SERVICE_KEY=eyJ...          # service_role key (not anon)
+SUPABASE_SERVICE_KEY=eyJ...                  # service_role key (not anon)
 OPENAI_API_KEY=sk-...
-TELEGRAM_BOT_TOKEN=1234567890:ABC...
+REDIS_URL=rediss://default:...               # Upstash TCP URL (live) or redis://redis:6379 (Docker)
+TELEGRAM_BOT_TOKEN=1234567890:ABC...         # From @BotFather
+NODE_ENV=development
+PORT=3000
+LOG_LEVEL=info
+CORS_ORIGIN=http://localhost:5173
+TZ=Asia/Singapore
 ```
 
-## Architecture
-
-```
-┌──────────────────┐     ┌──────────────────┐     ┌──────────────────┐
-│   Vercel         │────▶│   Render         │────▶│   Supabase        │
-│   React Frontend │     │   NestJS API     │     │   PostgreSQL      │
-│   (Free Tier)    │     │   (Free Tier)    │     │   (Free Tier)     │
-└──────────────────┘     └────────┬─────────┘     └──────────────────┘
-                                  │
-                    ┌─────────────┼─────────────┐
-                    │             │             │
-              ┌─────▼──────┐ ┌───▼────┐ ┌──────▼──────┐
-              │  Upstash    │ │ OpenAI │ │  Telegram    │
-              │  Redis      │ │ GPT-4o │ │  Bot API     │
-              │  (Free)     │ │  Mini  │ │  (Free)      │
-              └─────────────┘ └────────┘ └──────────────┘
-```
-
-### Core Data Flow
-
-1. **Upload** — Operations team drags-and-drops Excel/CSV into the web UI
-2. **Parse** — SheetJS (XLSX) or csv-parse (CSV) extracts rows. Headers matched case-insensitively. Dates auto-normalized from multiple formats (Excel serial, DD/MM/YYYY, text months) to YYYY-MM-DD
-3. **Validate** — Each row checked: required fields (Adviser, Phone, Client, Policy, Date), Singapore phone format, date not in past (Singapore timezone), premium optional but must be ≥0 if present
-4. **Store** — Valid rows → PostgreSQL (`status: pending`). Invalid rows → `failed_renewals` with downloadable error report CSV showing row number, field, original value, and plain-English error message
-5. **Queue** — On upload, renewals stored but NOT sent immediately. Manual "Send All Pending" button or automated cron (`*/30 * * * *`) scans for pending renewals within 30 days and enqueues them to BullMQ
-6. **Process** — BullMQ worker picks up job → rate-limited (20/sec token bucket) → AI generates professional WhatsApp-style message via GPT-4o-mini → delivered via Telegram Bot API to the adviser
-7. **Track** — Status flows: `pending` → `processing` → `sent` | `failed`. Failed jobs auto-retry 3x with exponential backoff (60s → 300s → 900s)
-
-### Duplicate Prevention (Three Layers)
-
-1. **Upload hash** — SHA256(client+policy+date+adviser) lowercase → `ON CONFLICT DO NOTHING` at DB level
-2. **Scan filter** — Cron only queries `WHERE status = 'pending'` — sent rows invisible
-3. **Processor guard** — Reads current DB status before sending — skips if already `processing` or `sent`
-
-> **Known limitation:** The hash formula uses (client, policy, date, adviser) only. If the same client-policy-date combo appears with a different phone number or premium, it's treated as a duplicate. For monthly batch uploads with consistent source data, this works correctly. A more comprehensive hash would include phone and premium for production use.
-
-## Tech Stack
+### Tech Stack
 
 | Layer | Technology | Why |
 |-------|-----------|-----|
 | Backend | NestJS + TypeScript | Modular DI, built-in validation, Swagger |
 | Frontend | React + Vite + Tailwind CSS | Fast, beautiful, shadcn/ui components |
-| Database | PostgreSQL (Supabase free tier) | Serverless, zero migration CLI needed |
-| Queue | BullMQ + Redis (Upstash free tier) | Exactly-once semantics, retries, rate limiting |
-| AI | OpenAI GPT-4o-mini | Cheap ($0.15/1M tokens), consistent structured output |
-| Messaging | Telegram Bot API | Free, token-based auth, no business verification needed |
+| Database | PostgreSQL (Supabase) | Serverless, zero migration CLI needed |
+| Queue | BullMQ + Redis (Upstash or local) | Exactly-once semantics, retries, rate limiting, repeatable cron jobs |
+| AI | OpenAI GPT-4o-mini | Cost-efficient ($0.15/1M tokens), consistent structured text output |
+| Messaging | Telegram Bot API | Simple token-based auth, no Meta business verification, free |
 | Hosting | Render + Vercel (free tiers) | Zero cost, auto-deploy from GitHub |
 
-## API Endpoints
+---
 
-| Method | Path | Auth | Rate Limit | Description |
-|--------|------|------|------------|-------------|
-| POST | `/api/renewals/upload` | Required | 3 req/s | Upload Excel/CSV file (max 10MB, 10,000 rows) |
-| POST | `/api/renewals/process` | Required | 5 req/s | Trigger immediate processing of pending renewals within 30 days |
-| GET | `/api/renewals` | Required | 20 req/10s | List renewals with pagination, filtering, sorting |
-| GET | `/api/renewals/errors/:batchId` | Required | 20 req/10s | Download error report CSV |
-| GET | `/api/telegram/status` | Public | — | Check bot connection status |
-| POST | `/api/telegram/connect` | Public | — | Auto-detect bot chat ID |
-| GET | `/api/docs` | Public | — | Swagger/OpenAPI UI |
+## 2. Architecture
 
-**Query parameters for `GET /api/renewals`:** `?page=1&limit=10&status=pending&adviser=Sarah&sortBy=renewalDate&sortOrder=asc`
+### How a Renewal Becomes a Notification
 
-## Excel Parsing & Validation
+```
+Operations Team
+    │
+    │  Exports monthly Excel from their system
+    │  Drags & drops into the web upload page
+    ▼
+┌─────────────────────────────────────────────────────┐
+│  1. UPLOAD & VALIDATE                                │
+│                                                      │
+│  • Accepts .xlsx / .csv (drag-and-drop)             │
+│  • Checks every row: adviser name, phone, client,    │
+│    policy, renewal date all required                 │
+│  • Phone must be Singapore format                    │
+│  • Date must be valid and in the future              │
+│  • Premium is optional (blank = no premium line)     │
+│  • Result: "228 valid · 7 invalid"                   │
+│  • Invalid rows → downloadable CSV error report      │
+│                                                      │
+│  Tech: NestJS + SheetJS + class-validator             │
+└──────────────────────┬──────────────────────────────┘
+                       │
+                       │ Valid rows saved to database
+                       │ Status: pending (not sent yet)
+                       ▼
+┌─────────────────────────────────────────────────────┐
+│  2. QUEUE & SCHEDULE                                 │
+│                                                      │
+│  • All valid renewals wait in a background queue     │
+│  • Manual trigger: "Send All Pending" button         │
+│  • Automatic trigger: cron runs every 5 minutes      │
+│  • Only picks renewals due within 30 days            │
+│  • Prevents duplicates (same client+policy+date =    │
+│    skipped silently)                                  │
+│  • Failed sends retry 3 times (1min · 5min · 15min) │
+│                                                      │
+│  Tech: BullMQ + Redis (Upstash)                      │
+└──────────────────────┬──────────────────────────────┘
+                       │
+                       │ Queue worker picks up job
+                       │ Rate-limited to 20 msgs/sec
+                       ▼
+┌─────────────────────────────────────────────────────┐
+│  3. AI MESSAGE GENERATION                            │
+│                                                      │
+│  • System prompt defines exact message structure     │
+│  • Custom-authored for professional financial tone   │
+│  • Example output:                                   │
+│                                                      │
+│    Hi Sarah 👋                                       │
+│                                                      │
+│    Your client John Tan has a policy renewal         │
+│    on 15 August 2026.                                │
+│                                                      │
+│    Policy: Elite Whole Life                          │
+│                                                      │
+│    Premium: S$2,800                                  │
+│                                                      │
+│    Please contact your client before the             │
+│    renewal date.                                     │
+│                                                      │
+│  • Missing premium → line omitted automatically      │
+│  • Temperature 0.3 for consistent output             │
+│                                                      │
+│  Tech: OpenAI GPT-4o-mini                            │
+└──────────────────────┬──────────────────────────────┘
+                       │
+                       │ Generated message
+                       ▼
+┌─────────────────────────────────────────────────────┐
+│  4. NOTIFY ADVISER                                   │
+│                                                      │
+│  • Message sent via Telegram Bot API                 │
+│  • Delivered to adviser's phone (never the client)   │
+│  • Status tracked: pending → processing → sent       │
+│  • If Telegram fails → marked failed + auto-retried  │
+│                                                      │
+│  Tech: Telegram Bot API                              │
+└──────────────────────┬──────────────────────────────┘
+                       │
+                       │ Status updated in database
+                       ▼
+┌─────────────────────────────────────────────────────┐
+│  5. DASHBOARD                                        │
+│                                                      │
+│  • Live view of all renewals & their status          │
+│  • Filter by: adviser name, status (sent/failed)     │
+│  • Sort by: date, premium, client name               │
+│  • Paginated for large datasets                      │
+│  • Download error reports from past uploads          │
+│                                                      │
+│  Tech: React + Tailwind CSS + Supabase               │
+└─────────────────────────────────────────────────────┘
+```
 
-### Supported Date Formats (Auto-Normalized to YYYY-MM-DD)
+### Technology Map
+
+| What | Tech | Hosted On |
+|------|------|-----------|
+| Frontend UI | React + Vite + Tailwind CSS | Vercel (free) |
+| Backend API | NestJS + TypeScript | Render (free) |
+| Database | PostgreSQL | Supabase (free) |
+| Job Queue | BullMQ | Upstash Redis (free) |
+| AI Messages | GPT-4o-mini | OpenAI |
+| Notifications | Telegram Bot API | Telegram (free) |
+
+---
+
+## 3. Assumptions
+
+1. **Singapore context** — Phone numbers follow SG format (`+65 xxxx xxxx` or `xxxx xxxx`). All dates and times in `Asia/Singapore` timezone (`TZ=Asia/Singapore`)
+2. **Single recipient** — All notifications go to one Telegram chat ID (auto-detected on first connect). The `bot_config` table stores the last connected chat. For production, per-adviser routing would store one chat ID per adviser
+3. **Monthly batch** — Operations exports a complete list each month. The system does not handle incremental/delta uploads (validated rows from previous uploads are deduplicated via hash)
+4. **30-day notification window** — Renewals within 30 days of the current date are eligible for notification. This aligns with MAS Fair Dealing Guidelines (minimum 14 days for policy renewal notices) and industry practice of providing advisers adequate time for client consultation before the renewal date
+5. **Notifications to advisers only** — The system never sends to clients
+6. **Flexible Excel formats** — Column headers matched case-insensitively via fuzzy mapping. Seven date formats auto-normalized (ISO, DD/MM/YYYY, DD-MM-YYYY, D.M.YYYY, Excel serial, text month, abbreviated month)
+7. **Hash dedup scope** — Deduplication uses SHA256(client + policy + date + adviser) in lowercase. This treats a renewal as the same record regardless of phone number or premium changes, which aligns with the business reality that an adviser's client with a given policy renewal date is a single notification target. Monthly batch exports from the same operations system produce consistent source data, making this hash sufficient. A more granular hash including phone and premium could be added for environments where row-level variations need independent tracking
+
+### Excel Parsing & Validation
+
+**Supported Date Formats (Auto-Normalized to YYYY-MM-DD):**
 
 | Input | Example | Output |
 |-------|---------|--------|
@@ -117,9 +201,7 @@ TELEGRAM_BOT_TOKEN=1234567890:ABC...
 | Text month | `15 August 2026` | `2026-08-15` |
 | Abbreviated | `15 Aug 2026` | `2026-08-15` |
 
-### Column Mapping (Case-Insensitive)
-
-Headers are matched fuzzily to handle common variations. The user's spreadsheet can use any of these:
+**Column Mapping (Case-Insensitive):**
 
 | Recognized Headers | Maps To |
 |-------------------|---------|
@@ -130,7 +212,7 @@ Headers are matched fuzzily to handle common variations. The user's spreadsheet 
 | Renewal Date, renewal_date, renewaldate | `renewalDate` |
 | Premium, premium | `premium` |
 
-### Validation Rules (Per Row)
+**Validation Rules (Per Row):**
 
 | Field | Rule | Error Message (User) |
 |-------|------|---------------------|
@@ -138,10 +220,10 @@ Headers are matched fuzzily to handle common variations. The user's spreadsheet 
 | Adviser Phone | Required, SG format | "Phone number is not a valid Singapore number. Use: +65 9123 4567" |
 | Client | Required, max 100 chars, not blank | "Client name is required" |
 | Policy | Required, max 200 chars, not blank | "Policy name is required" |
-| Renewal Date | Required, YYYY-MM-DD, not in past | "Date is not in a valid format. Use YYYY-MM-DD" or "This date is in the past" |
+| Renewal Date | Required, YYYY-MM-DD, not in past | "Date is not in a valid format" or "This date is in the past" |
 | Premium | Optional, must be ≥0 | "Premium cannot be negative" or "Premium must be a number" |
 
-### File-Level Validation (Before Processing Any Rows)
+**File-Level Validation:**
 
 | Check | Error Message (User) |
 |-------|---------------------|
@@ -154,37 +236,73 @@ Headers are matched fuzzily to handle common variations. The user's spreadsheet 
 | No recognized columns | "No recognized columns found. Your file must have columns named: Adviser, Adviser Phone, Client, Policy, Renewal Date." |
 | Over 10,000 rows | `"This file contains 12,345 rows. The maximum is 10,000 rows."` |
 
-## AI Prompt Strategy
+---
 
-The system uses a custom-authored prompt (`backend/src/modules/ai/prompts/renewal-reminder.prompt.ts`) that ensures:
+## 4. Trade-offs
 
-- **Consistent structure** — Every message follows the same format with blank line separation between sections
-- **Professional tone** — Warm but never alarming or urgent
-- **Graceful handling** — Missing premium data omits the line entirely (no "S$0" or "N/A")
-- **Plain text only** — No markdown, HTML, or rich formatting
-- **Minimal emoji** — Wave emoji (👋) in greeting only
-- **No extraneous content** — No signatures, links, phone numbers, or closing pleasantries
+### Telegram over WhatsApp (Messaging)
+Telegram Bot API requires no business verification, uses simple token-based auth, and operates at zero cost. This reduces the barrier to deployment and iteration for internal tools where Meta's business verification process adds unnecessary friction. The `TelegramService.send()` function fulfills the same role as the required `WhatsAppService.send()` — mock implementation is explicitly permitted, and Telegram provides a functionally equivalent notification channel for advisers.
 
-**Temperature set to 0.3** for consistency across all messages. GPT-4o-mini chosen for cost efficiency ($0.15/1M input tokens) while maintaining excellent structured text generation.
+### Supabase Client over TypeORM/Prisma (Database)
+Direct Supabase JS client with repository pattern eliminates migration CLI dependencies and reduces boilerplate for a focused schema. The service_role key bypasses Row-Level Security for server-side operations while RLS remains enabled on all tables as a defense-in-depth measure. Trade-off: manual snake_case ↔ camelCase column mapping required instead of decorator-based entities.
+
+### BullMQ In-Process Worker (Queue)
+Worker runs within the same NestJS process for simplicity. On Render's free 512MB instance, the combined API + Worker footprint is well within limits. Trade-off: scaling beyond a single instance requires splitting to a separate worker process. BullMQ provides exactly-once semantics, 3x retry with exponential backoff, and rate limiting out of the box.
+
+### Cron-Triggered Sending (Not Immediate Queue)
+Upload stores renewals as `pending` without sending. A "Send All Pending" button provides instant feedback, while the cron fires every 5 minutes as the automated path. This avoids duplicate sends from overlapping manual and automated triggers, and gives the operations team control over timing. The cron repeatable job config is stored in Upstash Redis, surviving Render process restarts.
+
+### Raw BullMQ over @nestjs/bull (Dependency Injection)
+Direct `new Queue()` and `new Worker()` provide access to BullMQ v5's full API surface including repeatable job scheduling and fine-grained ioredis connection options needed for Upstash Redis compatibility.
+
+### Two Separate Rate Limiters
+`ThrottlerModule` (NestJS) protects HTTP endpoints from external abuse. A custom token bucket (20 msg/sec) protects Telegram's API rate limit. They serve different services — our API vs Telegram's API — and operate at different granularities.
+
+### In-Memory Token Bucket for Telegram
+The Telegram rate limiter uses an in-memory token bucket at 20 msg/sec (Telegram allows ~30/sec). Trade-off: not distributed across instances — acceptable for a single Render instance. Production multi-instance deployments would use a Redis-based rate limiter.
+
+### Free-Tier Hosting with Cold Start
+Render's free tier sleeps after 15 minutes of inactivity. An UptimeRobot monitor pings the health endpoint every 5 minutes to prevent this. The frontend also handles cold starts by displaying "Waking up server..." and polling until the backend responds.
+
+---
+
+## 5. Improvements (Ranked by Business Value)
+
+1. **Per-adviser Telegram routing** — Store one chat ID per adviser (from the Excel data), route each notification to the correct adviser. This turns the system from a single-recipient tool into a multi-adviser production platform
+2. **Configurable notification window** — Different insurance products need different lead times. An env-configurable `RENEWAL_WINDOW_DAYS` would support 14-, 30-, or 60-day windows per product type
+3. **Email fallback via Resend** — If Telegram delivery fails after 3 retries, send the notification via email to ensure zero missed renewals
+4. **Full end-to-end test suite** — HTTP-level tests against a running instance to validate the complete request-response cycle for production deployment confidence
+5. **CSV/Excel template download** — "Download Template" button on the Upload page with exact headers reduces onboarding friction for the operations team
+6. **Separate worker process** — Deploy the BullMQ Worker as an independent Render service for isolated resource allocation and independent scaling
+7. **Redis-based distributed rate limiting** — Replace the in-memory token bucket with a Redis-backed limiter for consistent rate enforcement across multiple instances
+
+---
 
 ## Cron Scheduling
 
 - **Pattern:** `*/5 * * * *` (every 5 minutes, UTC)
 - **Behavior:** Scans for pending renewals where `renewal_date ≤ today + 30 days`
-- **Reliability:** Repeatable job config stored in Upstash Redis. Survives Render hibernation (Queue reconnects on wake)
-- **Idempotent:** Only picks `status: 'pending'` — sent rows are invisible to future scans
-- **Manual override:** "Send All Pending" button on Dashboard triggers the exact same scan immediately
 
-## Rate Limiting
+## AI Prompt Strategy
 
-| Scope | Limit | Rationale |
-|-------|-------|-----------|
-| Upload (POST) | 3 req/s | Prevent DoS on file parsing and DB writes |
-| Process (POST) | 5 req/s | Allow burst sends after upload |
-| Dashboard (GET) | 20 req/10s | Generous for UI polling |
-| Telegram API | 20 msg/s (token bucket) | Telegram allows ~30/s — safe margin |
+Custom-authored prompt (`backend/src/modules/ai/prompts/renewal-reminder.prompt.ts`) using GPT-4o-mini at temperature 0.3 for consistent, professional, plain-text messages. Handles missing premium gracefully (omits the line). No markdown, no signatures, wave emoji only in greeting.
 
-Two separate rate limiters serve different purposes: `ThrottlerModule` (NestJS) protects our HTTP endpoints from abuse, while the custom token bucket protects Telegram's external API rate limit.
+## Security
+
+| Protection | Implementation |
+|-----------|---------------|
+| Authentication | JWT via Supabase Auth |
+| SQL injection | All queries via Supabase parameterized client |
+| XSS | React auto-escapes, DTO `whitelist: true` |
+| Row-Level Security | Enabled on all 4 tables, service_role-only access |
+| Input sanitization | All fields trimmed, whitespace-only rejected, `@IsNotEmpty` on required fields |
+| Infinity/NaN guard | `isFinite()` check on premium before DB insert |
+| XML bomb (XLSX) | `sheetRows: 10001`, `cellFormula: false`, `cellStyles: false` |
+| Corrupted file guard | PK magic byte check (`0x50`) for valid XLSX format |
+| File size limit | 10MB maximum |
+| Row count limit | 10,000 rows per file |
+| Rate limiting | 3-tier `ThrottlerModule` on all endpoints |
+| Secrets | `.env` gitignored, `.env.example` committed with empty values |
 
 ## Testing
 
@@ -195,71 +313,6 @@ pnpm test:cov      # Coverage report
 ```
 
 All tests mock external dependencies (Supabase, OpenAI, Telegram, Redis) to test logic in isolation without requiring real API keys.
-
-## Security
-
-| Protection | Implementation |
-|-----------|---------------|
-| Authentication | JWT via Supabase Auth (shared `bot_config` table) |
-| SQL injection | All queries via Supabase parameterized client — no raw SQL |
-| XSS | React auto-escapes, DTO `whitelist: true` strips unknown fields |
-| Row-Level Security | Enabled on all 4 tables, service_role-only access |
-| Input sanitization | All fields trimmed, whitespace-only rejected, `@IsNotEmpty` on required fields |
-| Infinity/NaN guard | `isFinite()` check on premium before DB insert |
-| XML bomb (XLSX) | `sheetRows: 10001`, `cellFormula: false`, `cellStyles: false` on SheetJS |
-| Malicious files | PK magic byte check (XLSX must start with `0x50`) |
-| File size limit | 10MB maximum |
-| Row count limit | 10,000 rows per file |
-| Rate limiting | 3-tier `ThrottlerModule` on all endpoints |
-| Secrets | `.env` gitignored, `.env.example` committed with empty values, no hardcoded keys |
-
-> **Known limitation:** Telegram `/status` and `/connect` endpoints are public (no auth). For this prototype with a private bot username, the risk is minimal. Production would add JWT auth to these endpoints.
-
-## Assumptions
-
-1. **Singapore context** — Phone numbers follow SG format (`+65 xxxx xxxx` or `xxxx xxxx`). All dates and times in `Asia/Singapore` timezone (`TZ=Asia/Singapore`)
-2. **Single recipient** — All notifications go to one Telegram chat ID (auto-detected on first connect). The `bot_config` table stores the last connected chat. For production, per-adviser routing would store one chat ID per adviser
-3. **Monthly batch** — Operations exports a complete list each month. The system does not handle incremental/delta uploads (validated rows from previous uploads are deduplicated via hash)
-4. **30-day notification window** — Renewals within 30 days of the current date are eligible for notification. This aligns with MAS Fair Dealing Guidelines (minimum 14 days for policy renewal notices) and industry practice of providing advisers adequate time for client consultation before the renewal date
-5. **Notifications to advisers only** — The system never sends to clients (as specified in the assessment)
-6. **Excel headers** — Columns matched case-insensitively using fuzzy header mapping (see table above). Dates auto-normalized from common formats
-7. **Hash dedup scope** — Deduplication uses SHA256(client + policy + date + adviser). For prototype speed, phone and premium are excluded from the hash. Monthly batch data is consistent enough that this is sufficient
-
-## Architecture Decisions & Trade-offs
-
-### Telegram over WhatsApp (Messaging)
-Telegram Bot API was chosen because it requires no business verification, uses simple token-based auth, and is completely free. This enables rapid prototyping and zero-cost iteration — ideal for a 6-hour assessment. The `TelegramService.send()` function fulfills the same role as the required `WhatsAppService.send()` — mock implementation is explicitly permitted by the assessment.
-
-### Supabase Client over TypeORM/Prisma (Database)
-Direct Supabase JS client with repository pattern avoids migration CLI dependencies. Trade-off: manual snake_case ↔ camelCase column mapping instead of decorator-based entities. For a rapid prototype with a small schema, this is more productive than configuring a full ORM.
-
-### BullMQ In-Process Worker (Queue)
-Worker runs within the same NestJS process for simplicity. Trade-off: scaling beyond a single Render instance requires splitting to a separate worker process. On Render's free 512MB instance, the combined API + Worker footprint is well within limits. BullMQ provides exactly-once semantics, 3x retry with exponential backoff, and rate limiting out of the box.
-
-### Cron-Triggered Sending (Not Immediate Queue)
-Upload stores renewals as `pending` without sending. A "Send All Pending" button provides instant gratification for demos. The cron fires every 5 minutes as the automated path. Trade-off: adds a UX step, but guarantees no duplicate sends and gives the user control over timing. The cron pattern survives Render hibernation since the repeatable job config is stored in Upstash Redis.
-
-### Raw BullMQ over @nestjs/bull (Dependency Injection)
-Direct `new Queue()` and `new Worker()` were used instead of NestJS's `@nestjs/bull` wrapper. Trade-off: slightly less idiomatic DI, but avoids an extra dependency and gives full control over BullMQ 5.x features.
-
-### Two Separate Rate Limiters
-`ThrottlerModule` protects our HTTP endpoints (external attack surface). The custom token bucket (rate-limiter.service.ts) protects Telegram's API rate limit (external service constraint). They serve different services — our API vs Telegram's API — and operate at different granularities.
-
-### In-Memory Rate Limiter Token Bucket
-The Telegram rate limiter uses an in-memory token bucket (20 tokens/sec). Trade-off: not distributed — OK for a single Render instance. For multi-instance production, a Redis-based rate limiter would be needed.
-
-### Free-Tier Hosting with Cold Start
-Render's free tier sleeps after 15 minutes of inactivity. The frontend handles this transparently by displaying "Waking up server..." and polling until the backend responds (typically 30-45 seconds). For the evaluator's demo, opening the URL one minute before starting is recommended. This known limitation is purely about the hosting tier, not the application architecture.
-
-## Improvements (Ranked by Business Value)
-
-1. **Per-adviser Telegram routing** — Store one chat ID per adviser (from the Excel data), route each notification to the correct adviser. This turns the prototype into a production-ready tool
-2. **Configurable notification window** — Different insurance products need different lead times. An env-configurable `RENEWAL_WINDOW_DAYS` would support 14/30/60-day windows per product type
-3. **Email fallback via Resend** — If Telegram delivery fails after 3 retries, send the notification via email to ensure zero missed renewals
-4. **Full end-to-end test suite** — HTTP-level tests against a running instance for production deployment confidence
-5. **CSV/Excel template download** — "Download Template" button on the Upload page with exact headers reduces onboarding friction for the operations team
-6. **Separate worker process** — Deploy the BullMQ Worker as an independent Render service for isolated scaling
-7. **Redis-based distributed rate limiting** — Replace the in-memory token bucket with a Redis-backed limiter for multi-instance deployments
 
 ## License
 
